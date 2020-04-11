@@ -455,19 +455,6 @@ void Manager::Private::clearNotification(PeerId peerId, MsgId msgId) {
 	}
 }
 
-namespace {
-bool isFullScreen() {
-	QUERY_USER_NOTIFICATION_STATE userState = {};
-	if (FAILED(::SHQueryUserNotificationState(&userState))) {
-		return false;
-	}
-
-	return userState == QUNS_RUNNING_D3D_FULL_SCREEN ||
-		   userState == QUNS_PRESENTATION_MODE ||
-		   userState == QUNS_QUIET_TIME;
-}
-}
-
 bool Manager::Private::showNotification(
 		not_null<PeerData*> peer,
 		MsgId msgId,
@@ -477,8 +464,6 @@ bool Manager::Private::showNotification(
 		bool hideNameAndPhoto,
 		bool hideReplyButton) {
 	if (!_notificationManager || !_notifier || !_notificationFactory) return false;
-
-	if (isFullScreen()) return false;
 
 	ComPtr<IXmlDocument> toastXml;
 	bool withSubtitle = !subtitle.isEmpty();
@@ -699,13 +684,16 @@ static constexpr auto kQuerySettingsEachMs = 1000;
 crl::time LastSettingsQueryMs = 0;
 
 void querySystemNotificationSettings() {
+	// Always query the user notification state because it's a cheap operation.
+	queryUserNotificationState();
+
+	// Querying the quiet hours is a heavier operation (registery) so we'll limit the query rate.
 	auto ms = crl::now();
 	if (LastSettingsQueryMs > 0 && ms <= LastSettingsQueryMs + kQuerySettingsEachMs) {
 		return;
 	}
 	LastSettingsQueryMs = ms;
 	queryQuietHours();
-	queryUserNotificationState();
 }
 
 } // namespace
@@ -715,6 +703,7 @@ bool SkipAudio() {
 
 	if (UserNotificationState == QUNS_NOT_PRESENT
 		|| UserNotificationState == QUNS_PRESENTATION_MODE
+		|| UserNotificationState == QUNS_QUIET_TIME
 		|| QuietHoursEnabled) {
 		return true;
 	}
@@ -730,8 +719,9 @@ bool SkipToast() {
 	querySystemNotificationSettings();
 
 	if (UserNotificationState == QUNS_PRESENTATION_MODE
+	    || UserNotificationState == QUNS_PRESENTATION_MODE
 		|| UserNotificationState == QUNS_RUNNING_D3D_FULL_SCREEN
-		//|| UserNotificationState == QUNS_BUSY
+		|| UserNotificationState == QUNS_QUIET_TIME
 		|| QuietHoursEnabled) {
 		return true;
 	}
